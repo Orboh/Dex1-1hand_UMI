@@ -59,9 +59,9 @@ class ESKF:
                  sigma_init_pos, # [m]
                  sigma_init_vel, # [m/s]
                  sigma_init_dtheta, # [rad]
-                 mode # 'gripper' or 'pruner'
+                 mode # 'gripper' or 'pruner' or 'dex1'
                  ):
-        
+
         # NOTE: TX_CUBE_IMU: Frame of IMU with respect to the CUBE frame
         # Gripper
         if mode=='gripper':
@@ -79,6 +79,16 @@ class ESKF:
                                          [ 0,-1, 0, 0.085],
                                          [ 0, 0,-1,-0.207 ],
                                          [ 0, 0, 0, 1    ]])
+        elif mode=='dex1':
+            # Dex1-1 cutter: same cube<->GoPro mount orientation as 'gripper',
+            # but the physical mount position differs and was measured by the
+            # team as: depth (cube center -> GoPro) = 0.12 m; height (GoPro
+            # mount sits 0.025 m higher than the cube center, same direction
+            # as the 'gripper' mode default, just a different magnitude).
+            self.TX_CUBE_IMU = np.array([[-1, 0, 0, 0.00  ],
+                                         [ 0,-1, 0, 0.12   ],
+                                         [ 0, 0, 1, 0.025  ],
+                                         [ 0, 0, 0, 1      ]])
         
         sigma_accel_drift = 0.001 * sigma_accel  # [m/s^2 sqrt(s)] (Educated guess, real value to be measured)
         sigma_gyro_drift = 0.001 * sigma_gyro  # [rad/s sqrt(s)] (Educated guess, real value to be measured)
@@ -802,7 +812,7 @@ class ESKF:
 
 @click.command()
 @click.option('-i', '--input_path', required=True, help='Path to the data directory')
-@click.option('-m', '--mode', type=str, required=True, help='pruner or gripper')
+@click.option('-m', '--mode', type=str, required=True, help='pruner or gripper or dex1')
 @click.option('-v', '--visualize', is_flag=True, default=True, help='Visualize the imported data')
 @click.option('-o', '--output_path', default=None, help='Output path for the synchronized plot video')
 def main(input_path, mode, visualize, output_path):

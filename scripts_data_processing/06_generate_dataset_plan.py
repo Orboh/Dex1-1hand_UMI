@@ -78,7 +78,7 @@ def get_x_projection(tx_tag_this, tx_tag_other):
 @click.option('-nz', '--nominal_z', type=float, default=0.072, help="nominal Z value for gripper finger tag")
 @click.option('-ml', '--min_episode_length', type=int, default=24)
 @click.option('--ignore_cameras', type=str, default=None, help="comma separated string of camera serials to ignore")
-@click.option('-m', '--mode', type=str, required=True, help='pruner or gripper')
+@click.option('-m', '--mode', type=str, required=True, help='pruner or gripper or dex1')
 def main(input, output, tx_slam_tag,
          nominal_z, min_episode_length, ignore_cameras, mode):
     # %% stage 0
@@ -97,6 +97,9 @@ def main(input, output, tx_slam_tag,
     elif mode.startswith('pruner'): # NOTE: need to double check if this is true for both pruner modes
         tcp_offset = 0.145
         cam_to_center_height = 0.076
+    elif mode == 'dex1':
+        tcp_offset = 0.12 # Axial distance from mounting screw to cutter tip (measured from CAD, Dex1-1 cutter)
+        cam_to_center_height = 0.06 # Vertical distance from mounting screw to cutter height (measured from CAD, Dex1-1 cutter)
 
     # optical center to mounting screw, positive is when optical center is in front of the mount
     cam_to_mount_offset = 0.01465 # constant for GoPro Hero 9,10,11
@@ -120,27 +123,30 @@ def main(input, output, tx_slam_tag,
     tx_tag_slam = np.eye(4)
 
     # load gripper calibration
+    # Dex1-1 cutter does not record open/close width, so no gripper_calibration
+    # videos are expected/used in this mode.
     gripper_id_gripper_cal_map = dict()
     cam_serial_gripper_cal_map = dict()
 
-    with ExifToolHelper() as et:
-        for gripper_cal_path in demos_dir.glob("gripper*/gripper_range.json"):
-            mp4_path = gripper_cal_path.parent.joinpath('raw_video.mp4')
-            meta = list(et.get_metadata(str(mp4_path)))[0]
-            cam_serial = meta['QuickTime:CameraSerialNumber']
+    if mode != 'dex1':
+        with ExifToolHelper() as et:
+            for gripper_cal_path in demos_dir.glob("gripper*/gripper_range.json"):
+                mp4_path = gripper_cal_path.parent.joinpath('raw_video.mp4')
+                meta = list(et.get_metadata(str(mp4_path)))[0]
+                cam_serial = meta['QuickTime:CameraSerialNumber']
 
-            gripper_range_data = json.load(gripper_cal_path.open('r'))
-            gripper_id = gripper_range_data['gripper_id']
-            max_width = gripper_range_data['max_width']
-            min_width = gripper_range_data['min_width']
-            gripper_cal_data = {
-                'aruco_measured_width': [min_width, max_width],
-                'aruco_actual_width': [min_width, max_width],
-                'mode': mode
-            }
-            gripper_cal_interp = get_gripper_calibration_interpolator(**gripper_cal_data)
-            gripper_id_gripper_cal_map[gripper_id] = gripper_cal_interp
-            cam_serial_gripper_cal_map[cam_serial] = gripper_cal_interp
+                gripper_range_data = json.load(gripper_cal_path.open('r'))
+                gripper_id = gripper_range_data['gripper_id']
+                max_width = gripper_range_data['max_width']
+                min_width = gripper_range_data['min_width']
+                gripper_cal_data = {
+                    'aruco_measured_width': [min_width, max_width],
+                    'aruco_actual_width': [min_width, max_width],
+                    'mode': mode
+                }
+                gripper_cal_interp = get_gripper_calibration_interpolator(**gripper_cal_data)
+                gripper_id_gripper_cal_map[gripper_id] = gripper_cal_interp
+                cam_serial_gripper_cal_map[cam_serial] = gripper_cal_interp
     
     # %% stage 1
     # loop over all demo directory to extract video metadata
@@ -304,6 +310,19 @@ def main(input, output, tx_slam_tag,
         if not pkl_path.is_file():
             vid_idx_gripper_hardware_id_map[vid_idx] = -1
             continue
+
+        if mode == 'dex1':
+            # Dex1-1 cutter has no finger-tag markers (no gripper_width
+            # tracking), so gripper identity can't be classified by tag as
+            # below. Since video_meta_df is built from demo_*/raw_video.mp4
+            # only (i.e. already gripper-camera videos, see video_dirs
+            # above), and Dex1-1 is a single-gripper setup, just assign
+            # hardware id 0 to every such camera.
+            gripper_id_by_tag = 0
+            cam_serial_gripper_ids_map[row['camera_serial']].append(gripper_id_by_tag)
+            vid_idx_gripper_hardware_id_map[vid_idx] = gripper_id_by_tag
+            continue
+
         tag_data = pickle.load(pkl_path.open('rb'))
         n_frames = len(tag_data)
         tag_counts = collections.defaultdict(lambda: 0)
@@ -313,18 +332,18 @@ def main(input, output, tx_slam_tag,
         tag_stats = collections.defaultdict(lambda: 0.0)
         for k, v in tag_counts.items():
             tag_stats[k] = v / n_frames
-            
+
         # classify gripper by tag
         # tag 0, 1 are reserved for gripper 0
         # tag 6, 7 are reserved for gripper 1
         max_tag_id = np.max(list(tag_stats.keys()))
         tag_per_gripper = 6
         max_gripper_id = max_tag_id // tag_per_gripper
-        
+
         gripper_prob_map = dict()
         for gripper_id in range(max_gripper_id+1):
             left_id = gripper_id * tag_per_gripper
-            right_id = left_id 
+            right_id = left_id
             if mode == 'gripper':
                 right_id += 1
             left_prob = tag_stats[left_id]
@@ -333,7 +352,7 @@ def main(input, output, tx_slam_tag,
             if gripper_prob <= 0:
                 continue
             gripper_prob_map[gripper_id] = gripper_prob
-        
+
         gripper_id_by_tag = -1
         if len(gripper_prob_map) > 0:
             gripper_probs = sorted(gripper_prob_map.items(), key=lambda x:x[-1])
@@ -614,19 +633,32 @@ def main(input, output, tx_slam_tag,
             df = csv_df.iloc[start_frame_idx: start_frame_idx+n_frames]
             is_tracked = (~df['is_lost']).to_numpy()
 
+            # Trim the warm-up window right after EKF fusion starts: the
+            # filter needs time to settle (cube<->IMU fusion converging), so
+            # loss concentrated in this window is expected and not a real
+            # tracking failure. Excluded from the loss-rate gate below and
+            # marked invalid for actual episode/trajectory use further down.
+            # (See trajectory_result/SUMMARY.md from a prior Dex1-1 fiducial
+            # cube run: trimming the first ~1-2s recovered most demos that
+            # otherwise failed this gate.)
+            trim_sec = 0.0
+            n_trim_frames = min(int(round(trim_sec / dt)), len(is_tracked))
+            is_tracked_for_gate = is_tracked.copy()
+            is_tracked_for_gate[:n_trim_frames] = True
+
             # basic filtering to remove bad tracking
-            n_frames_lost = (~is_tracked).sum()
+            n_frames_lost = (~is_tracked_for_gate).sum()
             if n_frames_lost > 30:
                 print(f"Skipping {video_dir.name}, {n_frames_lost} frames are lost.")
                 dropped_camera_count[row['camera_serial']] += 1
                 continue
 
-            n_frames_valid = is_tracked.sum()
+            n_frames_valid = is_tracked_for_gate.sum()
             if n_frames_valid < 60:
                 print(f"Skipping {video_dir.name}, only {n_frames_valid} frames are valid.")
                 dropped_camera_count[row['camera_serial']] += 1
                 continue
-            
+
             # load camera pose
             df.loc[df['is_lost'], 'q_w'] = 1
             cam_pos = df[['x', 'y', 'z']].to_numpy()
@@ -641,7 +673,11 @@ def main(input, output, tx_slam_tag,
 
             # TODO: handle optinal robot cal based filtering
             is_step_valid = is_tracked.copy()
-            
+            # exclude the EKF warm-up window (see trim_sec above) from usable
+            # trajectory/action data, even if some of those frames happened
+            # to track fine.
+            is_step_valid[:n_trim_frames] = False
+
 
             # get gripper data
             pkl_path = video_dir.joinpath('tag_detection.pkl')
@@ -662,73 +698,78 @@ def main(input, output, tx_slam_tag,
                 continue
 
             # get gripper action
-            ghi = row['gripper_hardware_id']
-            if ghi < 0:
-                print(f"Skipping {video_dir.name}, invalid gripper hardware id {ghi}")
-                dropped_camera_count[row['camera_serial']] += 1
-                continue
-            
-            left_id = 6 * ghi
-            right_id = left_id + 1
+            # Dex1-1 cutter does not record open/close width, so gripper action
+            # extraction (ArUco-based width detection + calibration) is skipped entirely.
+            this_gripper_widths = None
+            if mode != 'dex1':
+                ghi = row['gripper_hardware_id']
+                if ghi < 0:
+                    print(f"Skipping {video_dir.name}, invalid gripper hardware id {ghi}")
+                    dropped_camera_count[row['camera_serial']] += 1
+                    continue
 
-            gripper_cal_interp = None
-            if ghi in gripper_id_gripper_cal_map:
-                gripper_cal_interp = gripper_id_gripper_cal_map[ghi]
-            elif row['camera_serial'] in cam_serial_gripper_cal_map:
-                gripper_cal_interp = cam_serial_gripper_cal_map[row['camera_serial']]
-                print(f"Gripper id {ghi} not found in gripper calibrations {list(gripper_id_gripper_cal_map.keys())}. Falling back to camera serial map.")
-            else:
-                raise RuntimeError("Gripper calibration not found.")
+                left_id = 6 * ghi
+                right_id = left_id + 1
 
-            gripper_timestamps = list()
-            gripper_widths = list()
-            gripper_debug = list()
-            for td in tag_detection_results:
-                if mode == 'gripper':
-                    fn = get_gripper_width
-                elif mode.startswith('pruner'):
-                    fn = get_pruner_z
-                width = fn(td['tag_dict'], 
-                    left_id=left_id, right_id=right_id, 
-                    nominal_z=nominal_z)
-                if width is not None:
-                    gripper_timestamps.append(td['time'])
-                    if mode=='gripper':
-                        gripper_widths.append(gripper_cal_interp(width))
+                gripper_cal_interp = None
+                if ghi in gripper_id_gripper_cal_map:
+                    gripper_cal_interp = gripper_id_gripper_cal_map[ghi]
+                elif row['camera_serial'] in cam_serial_gripper_cal_map:
+                    gripper_cal_interp = cam_serial_gripper_cal_map[row['camera_serial']]
+                    print(f"Gripper id {ghi} not found in gripper calibrations {list(gripper_id_gripper_cal_map.keys())}. Falling back to camera serial map.")
+                else:
+                    raise RuntimeError("Gripper calibration not found.")
+
+                gripper_timestamps = list()
+                gripper_widths = list()
+                gripper_debug = list()
+                for td in tag_detection_results:
+                    if mode == 'gripper':
+                        fn = get_gripper_width
                     elif mode.startswith('pruner'):
-                        # 1 = closed, 0 = open
-                        # 0.0 if < 0.3, else 1.0: open if < 0.3, else closed
-                        gripper_threshold = 0.5
-                        gripper_widths.append(0.0 if gripper_cal_interp(width) < gripper_threshold else 1.0)
-                        gripper_debug.append(gripper_cal_interp(width))
+                        fn = get_pruner_z
+                    width = fn(td['tag_dict'],
+                        left_id=left_id, right_id=right_id,
+                        nominal_z=nominal_z)
+                    if width is not None:
+                        gripper_timestamps.append(td['time'])
+                        if mode=='gripper':
+                            gripper_widths.append(gripper_cal_interp(width))
+                        elif mode.startswith('pruner'):
+                            # 1 = closed, 0 = open
+                            # 0.0 if < 0.3, else 1.0: open if < 0.3, else closed
+                            gripper_threshold = 0.5
+                            gripper_widths.append(0.0 if gripper_cal_interp(width) < gripper_threshold else 1.0)
+                            gripper_debug.append(gripper_cal_interp(width))
 
-            gripper_interp = get_interp1d(gripper_timestamps, gripper_widths) # NOTE: this might be a bug for pruner
+                gripper_interp = get_interp1d(gripper_timestamps, gripper_widths) # NOTE: this might be a bug for pruner
 
-            gripper_det_ratio = (len(gripper_widths) / len(tag_detection_results))
-            if gripper_det_ratio < 0.9:
-                print(f"Warining: {video_dir.name} only {gripper_det_ratio} of gripper tags detected.")
-            
-            this_gripper_widths = gripper_interp(video_timestamps)
-            this_gripper_widths = np.round(this_gripper_widths) 
+                gripper_det_ratio = (len(gripper_widths) / len(tag_detection_results))
+                if gripper_det_ratio < 0.9:
+                    print(f"Warining: {video_dir.name} only {gripper_det_ratio} of gripper tags detected.")
 
-            # Plot gripper width against time to check appropriate threshold  
-            plt.plot(gripper_timestamps, gripper_debug, '.-')
-            plt.plot(gripper_timestamps, gripper_widths, '.-')
-            plt.plot(video_timestamps, this_gripper_widths, '.-')
-            plt.legend(['Raw', 'Thresholded', 'Final'], loc='upper right')
-            plt.yticks([0, 0.2, 0.4, 0.6, 0.8, 1], ['Open', 0.2, 0.4, 0.6, 0.8, 'Closed'])
-            plt.xlabel('Frame')
-            plt.ylabel('Gripper Width')
-            plt.savefig(row.video_dir.joinpath('_gripper_widths.png'))
-            plt.close()
-            
+                this_gripper_widths = gripper_interp(video_timestamps)
+                this_gripper_widths = np.round(this_gripper_widths)
+
+                # Plot gripper width against time to check appropriate threshold
+                plt.plot(gripper_timestamps, gripper_debug, '.-')
+                plt.plot(gripper_timestamps, gripper_widths, '.-')
+                plt.plot(video_timestamps, this_gripper_widths, '.-')
+                plt.legend(['Raw', 'Thresholded', 'Final'], loc='upper right')
+                plt.yticks([0, 0.2, 0.4, 0.6, 0.8, 1], ['Open', 0.2, 0.4, 0.6, 0.8, 'Closed'])
+                plt.xlabel('Frame')
+                plt.ylabel('Gripper Width')
+                plt.savefig(row.video_dir.joinpath('_gripper_widths.png'))
+                plt.close()
+
             # transform to tcp frame
             tx_tag_tcp = tx_tag_cam @ tx_cam_tcp
             pose_tag_tcp = mat_to_pose(tx_tag_tcp)
             
             # output value
             assert len(pose_tag_tcp) == n_frames
-            assert len(this_gripper_widths) == n_frames
+            if this_gripper_widths is not None:
+                assert len(this_gripper_widths) == n_frames
             assert len(is_step_valid) == n_frames
             all_cam_poses.append(pose_tag_tcp)
             all_gripper_widths.append(this_gripper_widths)
@@ -779,14 +820,17 @@ def main(input, output, tx_slam_tag,
             for cam_idx, row in demo_video_meta_df.iterrows():
                 if cam_idx < n_gripper_cams:
                     pose_tag_tcp = all_cam_poses[cam_idx][start:end]
-                    
+
                     # gripper cam
-                    grippers.append({
+                    gripper_entry = {
                         "tcp_pose": pose_tag_tcp,
-                        "gripper_width": all_gripper_widths[cam_idx][start:end],
                         "demo_start_pose": demo_start_poses[cam_idx],
                         "demo_end_pose": demo_end_poses[cam_idx]
-                    })
+                    }
+                    if mode != 'dex1':
+                        # Dex1-1 cutter: gripper_width is not recorded/used
+                        gripper_entry["gripper_width"] = all_gripper_widths[cam_idx][start:end]
+                    grippers.append(gripper_entry)
                 # all cams
                 video_dir = row['video_dir']
                 vid_start_frame = cam_start_frame_idxs[cam_idx]

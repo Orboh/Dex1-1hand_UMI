@@ -18,7 +18,13 @@ import pandas as pd
 # %%
 @click.command(help='Session directories. Assumming mp4 videos are in <session_dir>/raw_videos')
 @click.argument('session_dir', nargs=-1)
-def main(session_dir):
+@click.option('-bs', '--birdseye_serial', type=str, default=None,
+    help='Camera serial number of the birdseye (external, fixed) camera. '
+         'If not given, falls back to guessing by event count (the camera '
+         'with fewer detected events is assumed to be the birdseye camera) '
+         '- this guess is unreliable/ambiguous when both cameras have the '
+         'same number of videos, so pass this explicitly in that case.')
+def main(session_dir, birdseye_serial):
     for session in session_dir:
         session = pathlib.Path(os.path.expanduser(session)).absolute()
         # hardcode subdirs
@@ -130,9 +136,19 @@ def main(session_dir):
                 duration = data.end_timestamp - data.start_timestamp
                 cam_serial_to_duration[key] += duration
 
-        # Determine the birds eye camera as it has 1 less event than the others
-        cam_serial_event_count = {key: len(value) for key, value in cam_serial_to_meta.items()}
-        birds_eye_cam_serial = min(cam_serial_event_count, key=cam_serial_event_count.get)
+        # Determine the birds eye camera.
+        if birdseye_serial is not None:
+            assert birdseye_serial in cam_serial_to_meta, \
+                f"--birdseye_serial {birdseye_serial} not found among detected " \
+                f"camera serials: {list(cam_serial_to_meta.keys())}"
+            birds_eye_cam_serial = birdseye_serial
+        else:
+            # Fallback: assume it has 1 less event than the others.
+            # NOTE: this is ambiguous/unreliable when camera video counts are
+            # equal (e.g. same number of gripper and birdseye videos) - pass
+            # --birdseye_serial explicitly in that case.
+            cam_serial_event_count = {key: len(value) for key, value in cam_serial_to_meta.items()}
+            birds_eye_cam_serial = min(cam_serial_event_count, key=cam_serial_event_count.get)
 
         for event in events:
             birds_eye_video = cam_serial_to_meta[birds_eye_cam_serial].loc[event[birds_eye_cam_serial]].video_dir
