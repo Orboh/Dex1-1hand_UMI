@@ -19,8 +19,13 @@ import subprocess
 @click.command()
 @click.argument('session_dir', nargs=-1)
 @click.option('-c', '--calibration_dir', type=str, default=None)
-@click.option('-m', '--mode', type=str, required=True, help='pruner or gripper or pruner_inverse')
-def main(session_dir, calibration_dir, mode):
+@click.option('-m', '--mode', type=str, required=True, help='pruner or gripper or pruner_inverse or dex1')
+@click.option('-bs', '--birdseye_serial', type=str, default=None,
+    help='Camera serial number of the birdseye (external, fixed) camera. '
+         'Passed through to 00_process_videos.py. Recommended when the '
+         'birdseye and gripper cameras have the same number of videos, '
+         'since auto-detection by event count is ambiguous in that case.')
+def main(session_dir, calibration_dir, mode, birdseye_serial):
     script_dir = pathlib.Path(__file__).parent.joinpath('scripts_data_processing')
     if calibration_dir is None:
         calibration_dir = pathlib.Path(__file__).parent.joinpath('config')
@@ -38,6 +43,8 @@ def main(session_dir, calibration_dir, mode):
             'python', str(script_path),
             str(session)
         ]
+        if birdseye_serial is not None:
+            cmd += ['--birdseye_serial', birdseye_serial]
         result = subprocess.run(cmd)
         assert result.returncode == 0
         

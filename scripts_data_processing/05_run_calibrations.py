@@ -21,12 +21,16 @@ def main(session_dir, mode):
         demos_dir = session.joinpath('demos')
         
         # run gripper range calibration
+        # Dex1-1 cutter does not record open/close width, so there is no
+        # gripper/pruner range calibration to run.
+        if mode == 'dex1':
+            continue
         if mode == 'gripper':
             script_path = script_dir.joinpath('calibrate_gripper_range.py')
         elif mode.startswith('pruner'):
             script_path = script_dir.joinpath('calibrate_pruner_range.py')
         assert script_path.is_file()
-        
+
         for gripper_dir in demos_dir.glob("gripper_calibration*"):
             gripper_range_path = gripper_dir.joinpath('gripper_range.json')
             tag_path = gripper_dir.joinpath('tag_detection.pkl')

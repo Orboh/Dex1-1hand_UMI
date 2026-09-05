@@ -299,13 +299,20 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
                 #             step_log['val_loss'] = val_loss
                 
                 def log_action_mse(step_log, category, pred_action, gt_action):
-                    B, T, _ = pred_action.shape
-                    pred_action = pred_action.view(B, T, -1, 10)
-                    gt_action = gt_action.view(B, T, -1, 10)
+                    B, T, D = pred_action.shape
+                    # Dex1-1 cutter has no gripper_width in the action space
+                    # (D==9: pos(3)+rot_6d(6)); UMI-standard gripper/pruner
+                    # additionally have gripper_width (D==10). Single-robot
+                    # assumed here, same as the previous hardcoded '10'.
+                    action_dim = D
+                    has_gripper_width = action_dim > 9
+                    pred_action = pred_action.view(B, T, -1, action_dim)
+                    gt_action = gt_action.view(B, T, -1, action_dim)
                     step_log[f'{category}_action_mse_error'] = torch.nn.functional.mse_loss(pred_action, gt_action)
                     step_log[f'{category}_action_mse_error_pos'] = torch.nn.functional.mse_loss(pred_action[..., :3], gt_action[..., :3])
                     step_log[f'{category}_action_mse_error_rot'] = torch.nn.functional.mse_loss(pred_action[..., 3:9], gt_action[..., 3:9])
-                    step_log[f'{category}_action_mse_error_width'] = torch.nn.functional.mse_loss(pred_action[..., 9], gt_action[..., 9])
+                    if has_gripper_width:
+                        step_log[f'{category}_action_mse_error_width'] = torch.nn.functional.mse_loss(pred_action[..., 9], gt_action[..., 9])
                 # run diffusion sampling on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0 and accelerator.is_main_process:
                     with torch.no_grad():

@@ -216,13 +216,22 @@ class UmiDataset(BaseDataset):
                 data_cache[key] = data_cache[key].reshape(B*T, D)
 
         # action
+        # Dex1-1 cutter datasets have no gripper_width in the action space
+        # (dim_a == pos(3) + rot(6) == 9); UMI-standard gripper/pruner datasets
+        # additionally include gripper_width (dim_a == 3 + 6 + 1 == 10).
+        has_gripper_width_action = any(
+            f'robot{i}_gripper_width' in self.shape_meta['obs'] for i in range(self.num_robot))
         assert data_cache['action'].shape[-1] % self.num_robot == 0
         dim_a = data_cache['action'].shape[-1] // self.num_robot
         action_normalizers = list()
         for i in range(self.num_robot):
-            action_normalizers.append(get_range_normalizer_from_stat(array_to_stats(data_cache['action'][..., i * dim_a: i * dim_a + 3])))              # pos
-            action_normalizers.append(get_identity_normalizer_from_stat(array_to_stats(data_cache['action'][..., i * dim_a + 3: (i + 1) * dim_a - 1]))) # rot
-            action_normalizers.append(get_range_normalizer_from_stat(array_to_stats(data_cache['action'][..., (i + 1) * dim_a - 1: (i + 1) * dim_a])))  # gripper
+            if has_gripper_width_action:
+                action_normalizers.append(get_range_normalizer_from_stat(array_to_stats(data_cache['action'][..., i * dim_a: i * dim_a + 3])))              # pos
+                action_normalizers.append(get_identity_normalizer_from_stat(array_to_stats(data_cache['action'][..., i * dim_a + 3: (i + 1) * dim_a - 1]))) # rot
+                action_normalizers.append(get_range_normalizer_from_stat(array_to_stats(data_cache['action'][..., (i + 1) * dim_a - 1: (i + 1) * dim_a])))  # gripper
+            else:
+                action_normalizers.append(get_range_normalizer_from_stat(array_to_stats(data_cache['action'][..., i * dim_a: i * dim_a + 3])))       # pos
+                action_normalizers.append(get_identity_normalizer_from_stat(array_to_stats(data_cache['action'][..., i * dim_a + 3: (i + 1) * dim_a]))) # rot
 
         normalizer['action'] = concatenate_normalizer(action_normalizers)
 

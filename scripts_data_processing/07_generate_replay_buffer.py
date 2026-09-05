@@ -101,20 +101,21 @@ def main(input, output, out_res, out_fov, compression_level,
                 assert n_cameras == len(cameras)
 
             episode_data = dict()
-            for gripper_id, gripper in enumerate(grippers):    
+            for gripper_id, gripper in enumerate(grippers):
                 eef_pose = gripper['tcp_pose']
                 eef_pos = eef_pose[...,:3]
                 eef_rot = eef_pose[...,3:]
-                gripper_widths = gripper['gripper_width']
                 demo_start_pose = np.empty_like(eef_pose)
                 demo_start_pose[:] = gripper['demo_start_pose']
                 demo_end_pose = np.empty_like(eef_pose)
                 demo_end_pose[:] = gripper['demo_end_pose']
-                
+
                 robot_name = f'robot{gripper_id}'
                 episode_data[robot_name + '_eef_pos'] = eef_pos.astype(np.float32)
                 episode_data[robot_name + '_eef_rot_axis_angle'] = eef_rot.astype(np.float32)
-                episode_data[robot_name + '_gripper_width'] = np.expand_dims(gripper_widths, axis=-1).astype(np.float32)
+                # Dex1-1 cutter dataset_plans have no gripper_width (see 06_generate_dataset_plan.py)
+                if 'gripper_width' in gripper:
+                    episode_data[robot_name + '_gripper_width'] = np.expand_dims(gripper['gripper_width'], axis=-1).astype(np.float32)
                 episode_data[robot_name + '_demo_start_pose'] = demo_start_pose
                 episode_data[robot_name + '_demo_end_pose'] = demo_end_pose
             

@@ -34,15 +34,20 @@ class SequenceSampler:
     ):
         episode_ends = replay_buffer.episode_ends[:]
 
-        # load gripper_width
-        gripper_width = replay_buffer['robot0_gripper_width'][:, 0]
-        gripper_width_threshold = 0.08
+        # load gripper_width, if this dataset records it.
+        # UMI-standard gripper/pruner modes record open/close width; the Dex1-1
+        # cutter does not, so before_first_grasp (grasp-based frame-repeat
+        # augmentation) stays False for those datasets, effectively disabling it.
+        has_gripper_width = 'robot0_gripper_width' in replay_buffer
+        if has_gripper_width:
+            gripper_width = replay_buffer['robot0_gripper_width'][:, 0]
+            gripper_width_threshold = 0.08
         self.repeat_frame_prob = repeat_frame_prob
 
         # create indices, including (current_idx, start_idx, end_idx)
         indices = list()
         for i in range(len(episode_ends)):
-            before_first_grasp = True # initialize for each episode
+            before_first_grasp = has_gripper_width # initialize for each episode
             if episode_mask is not None and not episode_mask[i]:
                 # skip episode
                 continue
@@ -53,7 +58,7 @@ class SequenceSampler:
             for current_idx in range(start_idx, end_idx):
                 if not action_padding and end_idx < current_idx + (key_horizon['action'] - 1) * key_down_sample_steps['action'] + 1:
                     continue
-                if gripper_width[current_idx] < gripper_width_threshold:
+                if has_gripper_width and gripper_width[current_idx] < gripper_width_threshold:
                     before_first_grasp = False
                 indices.append((current_idx, start_idx, end_idx, before_first_grasp))
         
@@ -93,7 +98,9 @@ class SequenceSampler:
         if 'action' in replay_buffer:
             self.replay_buffer['action'] = replay_buffer['action'][:]
         else:
-            # construct action (concatenation of [eef_pos, eef_rot, gripper_width])
+            # construct action (concatenation of [eef_pos, eef_rot, gripper_width]);
+            # gripper_width is only included when present in this dataset (see
+            # `if key in self.replay_buffer` below) - Dex1-1 cutter datasets omit it.
             actions = list()
             for robot_idx in range(self.num_robot):
                 for cat in ['eef_pos', 'eef_rot_axis_angle', 'gripper_width']:

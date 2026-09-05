@@ -163,3 +163,13 @@ cython_debug/
 
 # model ckpts
 *.pth
+
+# Data sessions and training outputs (large files: raw videos, zarr datasets,
+# demos/, checkpoints) - not for version control. Keep data/ as an empty dir.
+/data/*
+!/data/.gitkeep
+/data/outputs/
+wandb/
+
+# backup files created during manual config edits
+*.bak_*

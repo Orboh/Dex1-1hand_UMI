@@ -7,7 +7,8 @@
       "robot_ip": "192.168.0.11",
       #"robot_obs_latency": 0.0001, "robot_action_latency": 0.1, "tcp_offset": 0.235,
       #"robot_obs_latency": 0.0002, "robot_action_latency": 0.1, "tcp_offset": 0.235, #Gripper
-      "robot_obs_latency": 0.0002, "robot_action_latency": 0.1, "tcp_offset": 0.21, # Pruner
+      #"robot_obs_latency": 0.0002, "robot_action_latency": 0.1, "tcp_offset": 0.21, # Pruner
+      "robot_obs_latency": 0.0002, "robot_action_latency": 0.1, "tcp_offset": 0.12, # Dex1-1 Cutter (measured from CAD: mounting screw to cutter tip)
       # table height for finger-table collision avoidance
       # -inf to disable
       "height_threshold": -0.03, # ground_height: -0.55, #-0.085, #-0.024, # Height w.r.t. base frame

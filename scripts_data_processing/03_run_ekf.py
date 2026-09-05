@@ -16,7 +16,7 @@ from tqdm import tqdm
 # %%
 @click.command()
 @click.option('-i', '--input_dir', required=True, help='Directory for demos folder')
-@click.option('-m', '--mode', type=str, required=True, help='pruner or gripper')
+@click.option('-m', '--mode', type=str, required=True, help='pruner or gripper or dex1')
 @click.option('-n', '--num_workers', type=int, default=None)
 def main(input_dir, mode, num_workers):
     input_dir = pathlib.Path(os.path.expanduser(input_dir))
