@@ -89,13 +89,23 @@ def get_real_umi_obs_dict(
                     out_imgs = out_imgs.astype(np.float32) / 255
             # THWC to TCHW
             obs_dict_np[key] = np.moveaxis(out_imgs,-1,1)
-        elif type == 'low_dim' and ('eef' not in key):
-            this_data_in = env_obs[key]
-            obs_dict_np[key] = this_data_in
-            # handle multi-robots
+        elif type == 'low_dim':
             ks = key.split('_')
-            if ks[0].startswith('robot'):
+            # Raw eef keys (robotN_eef_pos / robotN_eef_rot_axis_angle) and any
+            # non-eef low_dim key (e.g. robotN_gripper_width) register the robot
+            # prefix so the relative-pose block below fires. Derived "_wrt_*"
+            # keys (robotN_eef_rot_axis_angle_wrt_start / _wrt{other}) are NOT
+            # raw inputs -- they are (re)generated further down -- so they are
+            # excluded here (registering them left robot_prefix_map EMPTY
+            # whenever shape_meta has no non-eef robot key at all, e.g. a
+            # gripper-width-free obs space, silently dropping robotN_eef_pos /
+            # robotN_eef_rot_axis_angle from obs_dict_np with no error until the
+            # policy's obs_encoder raised KeyError deep inside forward()).
+            if ks[0].startswith('robot') and 'wrt' not in key:
                 robot_prefix_map[ks[0]].append(key)
+            if 'eef' not in key and 'wrt' not in key:
+                this_data_in = env_obs[key]
+                obs_dict_np[key] = this_data_in
 
     # generate relative pose
     for robot_prefix in robot_prefix_map.keys():
